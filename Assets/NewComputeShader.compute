@@ -1,0 +1,39 @@
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+uniform float _Time; // Time passed from Unity (updated every frame)
+
+[numthreads(10,10,1)] // Thread group size
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    // Get texture dimensions
+    uint width, height;
+    Result.GetDimensions(width, height);  // Correctly get the dimensions
+    
+    // Calculate normalized coordinates for a smooth gradient
+    float2 uv = float2(id.x, id.y) / float2(width, height);
+
+    // Gradient effect using sine waves
+    float red = sin(uv.x * 10.0 + _Time * 0.5) * 0.5 + 0.5;
+    float green = sin(uv.y * 10.0 + _Time * 0.5) * 0.5 + 0.5;
+    float blue = sin((uv.x + uv.y) * 5.0 + _Time * 0.5) * 0.5 + 0.5;
+
+    // Introduce a noise effect based on the pixel coordinates for some texture
+    float noise = (sin(id.x * 0.1) + cos(id.y * 0.1)) * 0.1;
+
+    // Add the noise to the color channels
+    red += noise;
+    green += noise;
+    blue += noise;
+
+    // Clamp values to prevent overflow
+    red = clamp(red, 0.0, 1.0);
+    green = clamp(green, 0.0, 1.0);
+    blue = clamp(blue, 0.0, 1.0);
+
+    // Set the final color in the render texture
+    Result[id.xy] = float4(red, green, blue, 1.0);
+}

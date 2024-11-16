@@ -1,0 +1,157 @@
+#pragma kernel CSMain
+
+// Threshold for isocontour
+cbuffer MyConstants : register(b0)
+{
+    float threshold;
+    uint fieldWidth;   // Width of the scalar field
+    uint fieldHeight;  // Height of the scalar field
+};
+
+// Scalar field (2D grid of values)
+Texture2D<float> ScalarField : register(t0);
+
+// Counter buffer to track how many elements are appended
+RWBuffer<int> CounterBuffer : register(u1);  // New buffer for counting
+
+
+// Output buffer for line segments (append buffer)
+struct LineSegment {
+    float2 start;
+    float2 end;
+};
+AppendStructuredBuffer<LineSegment> LineSegments : register(u0);
+
+
+
+// Helper function to interpolate the edge position
+float2 InterpolateEdgePosition(int edge, uint x, uint y, float v0, float v1, float v2, float v3)
+{
+    float2 posA, posB;
+    float valA, valB;
+
+    // Determine which vertices are connected by the edge
+    if (edge == 0) { posA = float2(x, y); posB = float2(x + 1, y); valA = v0; valB = v1; }
+    else if (edge == 1) { posA = float2(x + 1, y); posB = float2(x + 1, y + 1); valA = v1; valB = v2; }
+    else if (edge == 2) { posA = float2(x + 1, y + 1); posB = float2(x, y + 1); valA = v2; valB = v3; }
+    else /*(edge == 3) */{ posA = float2(x, y + 1); posB = float2(x, y); valA = v3; valB = v0; }
+
+    // Interpolate the position along the edge based on the threshold
+    //float t = (threshold - valA) / (valB - valA);
+    float t = 0.5;
+    return lerp(posA, posB, t);
+}
+
+// Predefined edge lookup table (marching squares patterns)
+
+
+// Thread group size
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    /*
+    // Define a test array of 4 values
+    float test[4] = {-1.0, -1.0, -1.0, -1.0}; 
+
+    // Create a LineSegment struct
+    LineSegment segment;
+
+    // Assign the first two values of 'test' to the start position
+    segment.start = float2(test[0], test[1]);
+
+    // Assign the next two values of 'test' to the end position
+    segment.end = float2(test[2], test[3]);
+
+    // Append the segment to the buffer
+    LineSegments.Append(segment);
+        // Increment the counter after appending the line segments
+        int currentCount = CounterBuffer.Load(0); // Load the current count from the counter buffer
+        //CounterBuffer.Store(0, currentCount + 1);  // Increment the count
+       // atomicAdd(CounterBuffer[0], 1);  // Increment counter atomically
+       CounterBuffer[0]=currentCount+1;
+
+
+    return;
+    */
+
+    uint x = id.x;
+    uint y = id.y;
+
+    // Bounds check to avoid accessing outside the scalar field
+    if (x >= fieldWidth - 1 || y >= fieldHeight - 1) return;
+
+    // Fetch scalar values of the current grid cell
+    float v0 = ScalarField.Load(int3(x, y, 0));
+    float v1 = ScalarField.Load(int3(x + 1, y, 0));
+    float v2 = ScalarField.Load(int3(x + 1, y + 1, 0));
+    float v3 = ScalarField.Load(int3(x, y + 1, 0));
+
+    // Determine the cell configuration (4-bit index)
+    int caseIndex = 0;
+    if (v0 > threshold) caseIndex |= 1;
+    if (v1 > threshold) caseIndex |= 2;
+    if (v2 > threshold) caseIndex |= 4;
+    if (v3 > threshold) caseIndex |= 8;
+
+    int edgeTable[16][4] = {
+        {-1, -1, -1, -1},  // Case 0: No edges
+        {0, 3, -1, -1},    // Case 1
+        {0, 1, -1, -1},    // Case 2
+        {1, 3, -1, -1},    // Case 3
+        {1, 2, -1, -1},    // Case 4
+        {0, 3, 1, 2},      // Case 5
+        {0, 2, -1, -1},    // Case 6
+        {2, 3, -1, -1},    // Case 7
+        {2, 3, -1, -1},    // Case 8
+        {0, 2, -1, -1},    // Case 9
+        {0, 3, 1, 2},      // Case 10
+        {1, 2, -1, -1},    // Case 11
+        {1, 3, -1, -1},    // Case 12
+        {0, 1, -1, -1},    // Case 13
+        {0, 3, -1, -1},    // Case 14
+        {-1, -1, -1, -1}   // Case 15: No edges
+    };
+
+    // Fetch the edges for the current case index
+    int edges[4];
+    for (int i = 0; i < 4; ++i){
+        edges[i] = edgeTable[caseIndex][i];
+    
+    }
+
+    // Generate line segments for the valid edges
+    for (int i = 0; i < 4; i += 2)
+    {
+        if (edges[i] == -1 || edges[i + 1] == -1){
+             continue;
+        }
+
+        // Interpolate positions along the edges
+        float2 startPos = InterpolateEdgePosition(edges[i], x, y, v0, v1, v2, v3);
+        float2 endPos = InterpolateEdgePosition(edges[i + 1], x, y, v0, v1, v2, v3);
+
+        // Append the line segment to the buffer
+        // Create a LineSegment and assign the start and end positions explicitly
+        LineSegment segment;
+        segment.start = startPos;
+        segment.end = endPos;
+
+        // Append the segment to the buffer
+  // Assuming CounterBuffer is an array or a type that supports atomic operations.
+int currentCount = CounterBuffer.Load(0);  // Load the current count
+int newCount = currentCount + 1;
+
+// Use atomic compare-and-swap (CAS) to safely update the counter
+//CounterBuffer[0] = Interlocked.CompareExchange(ref CounterBuffer[0], newCount, currentCount);
+//CounterBuffer[0]=newCount;
+InterlockedAdd(CounterBuffer[0], 1);
+// Append the segment after updating the count
+LineSegments.Append(segment);
+
+
+    }
+
+    
+}
+
+
