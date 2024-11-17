@@ -6,6 +6,7 @@ cbuffer MyConstants : register(b0)
     float threshold;
     uint fieldWidth;   // Width of the scalar field
     uint fieldHeight;  // Height of the scalar field
+    int scale;
 };
 
 // Scalar field (2D grid of values)
@@ -27,14 +28,16 @@ AppendStructuredBuffer<LineSegment> LineSegments : register(u0);
 // Helper function to interpolate the edge position
 float2 InterpolateEdgePosition(int edge, uint x, uint y, float v0, float v1, float v2, float v3)
 {
+
+    //float scale=60.0;
     float2 posA, posB;
     float valA, valB;
 
     // Determine which vertices are connected by the edge
-    if (edge == 0) { posA = float2(x, y); posB = float2(x + 1, y); valA = v0; valB = v1; }
-    else if (edge == 1) { posA = float2(x + 1, y); posB = float2(x + 1, y + 1); valA = v1; valB = v2; }
-    else if (edge == 2) { posA = float2(x + 1, y + 1); posB = float2(x, y + 1); valA = v2; valB = v3; }
-    else /*(edge == 3) */{ posA = float2(x, y + 1); posB = float2(x, y); valA = v3; valB = v0; }
+    if (edge == 0) { posA = float2(x, y); posB = float2(x + scale, y); valA = v0; valB = v1; }
+    else if (edge == 1) { posA = float2(x + scale, y); posB = float2(x + scale, y + scale); valA = v1; valB = v2; }
+    else if (edge == 2) { posA = float2(x + scale, y + scale); posB = float2(x, y + scale); valA = v2; valB = v3; }
+    else /*(edge == 3) */{ posA = float2(x, y + scale); posB = float2(x, y); valA = v3; valB = v0; }
 
     // Interpolate the position along the edge based on the threshold
     //float t = (threshold - valA) / (valB - valA);
@@ -46,7 +49,7 @@ float2 InterpolateEdgePosition(int edge, uint x, uint y, float v0, float v1, flo
 
 
 // Thread group size
-[numthreads(16, 16, 1)]
+[numthreads(32, 32, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
     /*
@@ -79,12 +82,14 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
     // Bounds check to avoid accessing outside the scalar field
     if (x >= fieldWidth - 1 || y >= fieldHeight - 1) return;
+    x=x*scale;
+    y=y*scale;
 
     // Fetch scalar values of the current grid cell
     float v0 = ScalarField.Load(int3(x, y, 0));
-    float v1 = ScalarField.Load(int3(x + 1, y, 0));
-    float v2 = ScalarField.Load(int3(x + 1, y + 1, 0));
-    float v3 = ScalarField.Load(int3(x, y + 1, 0));
+    float v1 = ScalarField.Load(int3(x + 1*scale, y, 0));
+    float v2 = ScalarField.Load(int3(x + 1*scale, y + 1*scale, 0));
+    float v3 = ScalarField.Load(int3(x, y + 1*scale, 0));
 
     // Determine the cell configuration (4-bit index)
     int caseIndex = 0;
